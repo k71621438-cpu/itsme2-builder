@@ -6,6 +6,9 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 1: Build FFmpeg Native Libraries (ARM only)
+  # ─────────────────────────────────────────────────────────────────────────────
   build-ffmpeg:
     runs-on: ubuntu-22.04
     steps:
@@ -34,7 +37,7 @@ jobs:
       - name: Clone FFmpeg
         run: git clone --depth 1 --branch n6.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg-src
 
-      - name: Build FFmpeg for Android
+      - name: Build FFmpeg for Android (ARM only)
         working-directory: ffmpeg-src
         run: |
           TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
@@ -51,84 +54,43 @@ jobs:
             export CXX=$TOOLCHAIN/bin/$TARGET$API-clang++
             export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
             export STRIP=$TOOLCHAIN/bin/llvm-strip
+            export LD=$CC
             
             make distclean > /dev/null 2>&1 || true
             
-            # x86_64 needs special handling
-            if [ "$ARCH" = "x86_64" ]; then
-              ./configure \
-                --target-os=android \
-                --arch=$ARCH \
-                --cpu=$CPU \
-                --nm=$NM \
-                --ar=$AR \
-                --strip=$STRIP \
-                --cc=$CC \
-                --cxx=$CXX \
-                --ld=$CC \
-                --as=$AS \
-                --sysroot=$TOOLCHAIN/sysroot \
-                --enable-cross-compile \
-                --prefix=$GITHUB_WORKSPACE/output/$ABI \
-                --pkg-config=false \
-                --enable-static \
-                --disable-shared \
-                --disable-programs \
-                --disable-doc \
-                --disable-iconv \
-                --disable-avdevice \
-                --disable-postproc \
-                --disable-avfilter \
-                --disable-asm \
-                --disable-x86asm \
-                --enable-pic \
-                --enable-network \
-                --enable-swresample \
-                --enable-swscale \
-                --enable-protocol=file,pipe,http,https,tcp,udp,rtp,rtsp,rtmps,rtmpt,rtmpte,hls,mms,mmsh,mmst,ftp,ftps \
-                --enable-demuxer=rtsp,http,hls,rtmp,dash,mov,mp4,mkv,matroska,avi,flv,mpegts,mpegps,mjpeg,mpegvideo,wtv \
-                --enable-decoder=h264,hevc,vp8,vp9,aac,mp3,opus,mpeg4,mpeg2video,mpeg1video,mjpeg,mjpegb,h263,h263p \
-                --enable-parser=h264,hevc,vp8,vp9,aac,mpegaudio,opus,mpeg4video,mpegvideo \
-                --enable-muxer=mp4,mov,matroska \
-                --extra-cflags="-O3 -fPIC" \
-                --extra-ldflags="-fPIC" \
-                --extra-ldexeflags="-L$TOOLCHAIN/sysroot/usr/lib/$TARGET/$API"
-            else
-              # ARM targets
-              ./configure \
-                --target-os=android \
-                --arch=$ARCH \
-                --cpu=$CPU \
-                --nm=$NM \
-                --ar=$AR \
-                --strip=$STRIP \
-                --cc=$CC \
-                --cxx=$CXX \
-                --ld=$CC \
-                --as=$AS \
-                --enable-cross-compile \
-                --prefix=$GITHUB_WORKSPACE/output/$ABI \
-                --pkg-config=false \
-                --enable-static \
-                --disable-shared \
-                --disable-programs \
-                --disable-doc \
-                --disable-iconv \
-                --disable-avdevice \
-                --disable-postproc \
-                --disable-avfilter \
-                --enable-pic \
-                --enable-network \
-                --enable-swresample \
-                --enable-swscale \
-                --enable-protocol=file,pipe,http,https,tcp,udp,rtp,rtsp,rtmps,rtmpt,rtmpte,hls,mms,mmsh,mmst,ftp,ftps \
-                --enable-demuxer=rtsp,http,hls,rtmp,dash,mov,mp4,mkv,matroska,avi,flv,mpegts,mpegps,mjpeg,mpegvideo,wtv \
-                --enable-decoder=h264,hevc,vp8,vp9,aac,mp3,opus,mpeg4,mpeg2video,mpeg1video,mjpeg,mjpegb,h263,h263p \
-                --enable-parser=h264,hevc,vp8,vp9,aac,mpegaudio,opus,mpeg4video,mpegvideo \
-                --enable-muxer=mp4,mov,matroska \
-                --extra-cflags="-O3 -fPIC" \
-                --extra-ldflags="-fPIC"
-            fi
+            ./configure \
+              --target-os=android \
+              --arch=$ARCH \
+              --cpu=$CPU \
+              --nm=$NM \
+              --ar=$AR \
+              --strip=$STRIP \
+              --cc=$CC \
+              --cxx=$CXX \
+              --ld=$LD \
+              --as=$AS \
+              --enable-cross-compile \
+              --prefix=$GITHUB_WORKSPACE/output/$ABI \
+              --pkg-config=false \
+              --enable-static \
+              --disable-shared \
+              --disable-programs \
+              --disable-doc \
+              --disable-iconv \
+              --disable-avdevice \
+              --disable-postproc \
+              --disable-avfilter \
+              --enable-pic \
+              --enable-network \
+              --enable-swresample \
+              --enable-swscale \
+              --enable-protocol=file,pipe,http,https,tcp,udp,rtp,rtsp,rtmps,rtmpt,rtmpte,hls,mms,mmsh,mmst,ftp,ftps \
+              --enable-demuxer=rtsp,http,hls,rtmp,dash,mov,mp4,mkv,matroska,avi,flv,mpegts,mpegps,mjpeg,mpegvideo,wtv \
+              --enable-decoder=h264,hevc,vp8,vp9,aac,mp3,opus,mpeg4,mpeg2video,mpeg1video,mjpeg,mjpegb,h263,h263p \
+              --enable-parser=h264,hevc,vp8,vp9,aac,mpegaudio,opus,mpeg4video,mpegvideo \
+              --enable-muxer=mp4,mov,matroska \
+              --extra-cflags="-O3 -fPIC" \
+              --extra-ldflags="-fPIC"
             
             if [ $? -ne 0 ]; then
               echo "❌ Configure failed for $ABI"
@@ -141,9 +103,9 @@ jobs:
             make install
           }
           
+          # Build ARM architectures only (x86_64 removed - only needed for emulators)
           build_abi "arm64-v8a" "aarch64" "armv8-a" "aarch64-linux-android"
           build_abi "armeabi-v7a" "arm" "armv7-a" "armv7a-linux-androideabi"
-          build_abi "x86_64" "x86_64" "x86_64" "x86_64-linux-android"
 
       - name: Upload FFmpeg Artifacts
         uses: actions/upload-artifact@v4
@@ -152,11 +114,14 @@ jobs:
           path: output/
           retention-days: 14
 
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 2: Build the Android APK
+  # ─────────────────────────────────────────────────────────────────────────────
   build-apk:
     needs: build-ffmpeg
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout App Source
+      - name: Checkout App Source (Amkushu999/itsme2)
         uses: actions/checkout@v4
         with:
           repository: Amkushu999/itsme2
