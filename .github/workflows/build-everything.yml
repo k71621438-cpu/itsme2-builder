@@ -51,12 +51,10 @@ jobs:
             export CXX=$TOOLCHAIN/bin/$TARGET$API-clang++
             export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
             export STRIP=$TOOLCHAIN/bin/llvm-strip
-            # CRITICAL: Do NOT set LD to GNU ld. Leave it unset or set to $CC
-            unset LD
             
             make distclean > /dev/null 2>&1 || true
             
-            # x86_64 requires --sysroot and explicit library paths
+            # x86_64 needs special handling
             if [ "$ARCH" = "x86_64" ]; then
               ./configure \
                 --target-os=android \
@@ -93,9 +91,10 @@ jobs:
                 --enable-parser=h264,hevc,vp8,vp9,aac,mpegaudio,opus,mpeg4video,mpegvideo \
                 --enable-muxer=mp4,mov,matroska \
                 --extra-cflags="-O3 -fPIC" \
-                --extra-ldflags="-fPIC -L$TOOLCHAIN/sysroot/usr/lib/$TARGET/$API"
+                --extra-ldflags="-fPIC" \
+                --extra-ldexeflags="-L$TOOLCHAIN/sysroot/usr/lib/$TARGET/$API"
             else
-              # ARM targets - no --sysroot, keep assembly enabled
+              # ARM targets
               ./configure \
                 --target-os=android \
                 --arch=$ARCH \
