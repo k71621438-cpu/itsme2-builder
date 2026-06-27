@@ -1,0 +1,135 @@
+name: Build FFmpeg & Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 1: Build FFmpeg Native Libraries
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-ffmpeg:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache NDK
+        uses: actions/cache@v4
+        with:
+          path: android-ndk-r25c
+          key: ndk-r25c-linux-v1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential nasm yasm wget unzip
+
+      - name: Download Android NDK
+        run: |
+          if [ ! -d "android-ndk-r25c" ]; then
+            wget -q https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
+            unzip -q android-ndk-r25c-linux.zip
+          fi
+          echo "NDK=$PWD/android-ndk-r25c" >> $GITHUB_ENV
+
+      - name: Clone FFmpeg
+        run: git clone --depth 1 --branch n6.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg-src
+
+      - name: Build FFmpeg for Android
+        working-directory: ffmpeg-src
+        run: |
+          TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
+          API=29
+          build_abi() {
+            local ABI=$1 ARCH=$2 CPU=$3 TARGET=$4
+            echo "🔨 Building $ABI..."
+            export AR=$TOOLCHAIN/bin/llvm-ar
+            export NM=$TOOLCHAIN/bin/llvm-nm
+            export CC=$TOOLCHAIN/bin/$TARGET$API-clang
+            export AS=$CC
+            export CXX=$TOOLCHAIN/bin/$TARGET$API-clang++
+            export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
+            export STRIP=$TOOLCHAIN/bin/llvm-strip
+            make distclean > /dev/null 2>&1 || true
+            ./configure \
+              --target-os=android --arch=$ARCH --cpu=$CPU \
+              --nm=$NM --ar=$AR --strip=$STRIP --cc=$CC --cxx=$CXX \
+              --enable-cross-compile --prefix=$GITHUB_WORKSPACE/output/$ABI \
+              --pkg-config=false --enable-static --disable-shared \
+              --disable-programs --disable-doc --disable-iconv \
+              --disable-avdevice --disable-postproc --disable-avfilter \
+              --enable-network --enable-swresample --enable-swscale \
+              --enable-protocol=file,pipe,http,https,tcp,udp,rtp,rtsp,rtmps,rtmpe,rtmpt,rtmpte,hls,srt,mms,mmsh,mmst,ftp,ftps \
+              --enable-demuxer=rtsp,http,hls,rtmp,dash,mov,mp4,mkv,matroska,avi,flv,mpegts,mpegps,mjpeg,mpegvideo,flv,wtv \
+              --enable-decoder=h264,hevc,vp8,vp9,aac,mp3,opus,mpeg4,mpeg2video,mpeg1video,mjpeg,mjpegb,h263,h263p \
+              --enable-parser=h264,hevc,vp8,vp9,aac,mpegaudio,opus,mpeg4video,mpegvideo \
+              --enable-muxer=mp4,mov,matroska --extra-cflags="-O3 -fPIC" --extra-ldflags=""
+            make -j$(nproc) && make install
+          }
+          build_abi "arm64-v8a" "aarch64" "armv8-a" "aarch64-linux-android"
+          build_abi "armeabi-v7a" "arm" "armv7-a" "armv7a-linux-androideabi"
+          build_abi "x86_64" "x86_64" "x86_64" "x86_64-linux-android"
+
+      - name: Upload FFmpeg Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-android-prebuilt
+          path: output/
+          retention-days: 1
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 2: Build the Android APK
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-apk:
+    needs: build-ffmpeg
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout your app source code from the other repository
+      - name: Checkout App Source (Amkushu999/itsme2)
+        uses: actions/checkout@v4
+        with:
+          repository: Amkushu999/itsme2
+          token: ${{ secrets.APP_REPO_PAT }}
+          path: app-source
+
+      # Download FFmpeg .a files from Job 1
+      - name: Download FFmpeg Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ffmpeg-android-prebuilt
+          path: app-source/ffmpeg-android/
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android Licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Generate local.properties
+        working-directory: app-source
+        run: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" >> local.properties
+          echo "ffmpeg.dir=$GITHUB_WORKSPACE/app-source/ffmpeg-android" >> local.properties
+
+      - name: Make Gradlew executable
+        working-directory: app-source
+        run: chmod +x ./gradlew
+
+      - name: Build Debug APK
+        working-directory: app-source
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FaceGate-APK
+          path: app-source/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
