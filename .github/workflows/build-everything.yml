@@ -6,9 +6,6 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
-  # ─────────────────────────────────────────────────────────────────────────────
-  # JOB 1: Build FFmpeg Native Libraries
-  # ─────────────────────────────────────────────────────────────────────────────
   build-ffmpeg:
     runs-on: ubuntu-22.04
     steps:
@@ -47,7 +44,6 @@ jobs:
             local ABI=$1 ARCH=$2 CPU=$3 TARGET=$4
             echo "🔨 Building $ABI..."
             
-            # Set up cross-compilation environment
             export AR=$TOOLCHAIN/bin/llvm-ar
             export NM=$TOOLCHAIN/bin/llvm-nm
             export CC=$TOOLCHAIN/bin/$TARGET$API-clang
@@ -55,51 +51,73 @@ jobs:
             export CXX=$TOOLCHAIN/bin/$TARGET$API-clang++
             export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
             export STRIP=$TOOLCHAIN/bin/llvm-strip
-            
-            # CRITICAL: Do NOT set LD - let Clang act as the linker driver
-            # CRITICAL: Do NOT pass --sysroot to configure - NDK r23+ has it baked in
+            export LD=$CC
             
             make distclean > /dev/null 2>&1 || true
             
-            # Configure FFmpeg for Android
-            # NO --sysroot flag (causes linker errors with NDK r23+)
-            # NO export LD (causes linker path issues)
-            ./configure \
-              --target-os=android \
-              --arch=$ARCH \
-              --cpu=$CPU \
-              --nm=$NM \
-              --ar=$AR \
-              --strip=$STRIP \
-              --cc=$CC \
-              --cxx=$CXX \
-              --enable-cross-compile \
-              --prefix=$GITHUB_WORKSPACE/output/$ABI \
-              --pkg-config=false \
-              --enable-static \
-              --disable-shared \
-              --disable-programs \
-              --disable-doc \
-              --disable-iconv \
-              --disable-avdevice \
-              --disable-postproc \
-              --disable-avfilter \
-              --enable-network \
-              --enable-swresample \
-              --enable-swscale \
-              --enable-protocol=file,pipe,http,https,tcp,udp,rtp,rtsp,rtmps,rtmpe,rtmpt,rtmpte,hls,srt,mms,mmsh,mmst,ftp,ftps \
-              --enable-demuxer=rtsp,http,hls,rtmp,dash,mov,mp4,mkv,matroska,avi,flv,mpegts,mpegps,mjpeg,mpegvideo,flv,wtv \
-              --enable-decoder=h264,hevc,vp8,vp9,aac,mp3,opus,mpeg4,mpeg2video,mpeg1video,mjpeg,mjpegb,h263,h263p \
-              --enable-parser=h264,hevc,vp8,vp9,aac,mpegaudio,opus,mpeg4video,mpegvideo \
-              --enable-muxer=mp4,mov,matroska \
-              --extra-cflags="-O3 -fPIC" \
-              --extra-ldflags=""
+            # Base configure flags
+            CONFIGURE_FLAGS="
+              --target-os=android
+              --arch=$ARCH
+              --cpu=$CPU
+              --nm=$NM
+              --ar=$AR
+              --strip=$STRIP
+              --cc=$CC
+              --cxx=$CXX
+              --ld=$LD
+              --as=$AS
+              --enable-cross-compile
+              --prefix=$GITHUB_WORKSPACE/output/$ABI
+              --pkg-config=false
+              --enable-static
+              --disable-shared
+              --disable-programs
+              --disable-doc
+              --disable-iconv
+              --disable-avdevice
+              --disable-postproc
+              --disable-avfilter
+              --enable-pic
+              --enable-network
+              --enable-swresample
+              --enable-swscale
+              --enable-protocol=file,pipe,http,https,tcp,udp,rtp,rtsp,rtmps,rtmpt,rtmpte,hls,mms,mmsh,mmst,ftp,ftps
+              --enable-demuxer=rtsp,http,hls,rtmp,dash,mov,mp4,mkv,matroska,avi,flv,mpegts,mpegps,mjpeg,mpegvideo,wtv
+              --enable-decoder=h264,hevc,vp8,vp9,aac,mp3,opus,mpeg4,mpeg2video,mpeg1video,mjpeg,mjpegb,h263,h263p
+              --enable-parser=h264,hevc,vp8,vp9,aac,mpegaudio,opus,mpeg4video,mpegvideo
+              --enable-muxer=mp4,mov,matroska
+            "
+            
+            # x86_64-specific flags to fix linker issues
+            if [ "$ARCH" = "x86_64" ]; then
+              CONFIGURE_FLAGS="$CONFIGURE_FLAGS
+                --disable-asm
+                --disable-x86asm
+                --extra-cflags=-O3 -fPIC
+                --extra-ldflags=-fPIC -L$TOOLCHAIN/sysroot/usr/lib/$TARGET/$API
+              "
+            else
+              # ARM targets - keep assembly enabled for performance
+              CONFIGURE_FLAGS="$CONFIGURE_FLAGS
+                --extra-cflags=-O3 -fPIC
+                --extra-ldflags=-fPIC
+              "
+            fi
+            
+            ./configure $CONFIGURE_FLAGS
+            
+            if [ $? -ne 0 ]; then
+              echo "❌ Configure failed for $ABI"
+              echo "=== Last 100 lines of config.log ==="
+              tail -n 100 ffbuild/config.log
+              exit 1
+            fi
             
             make -j$(nproc)
             make install
           }
           
-          # Build for all three architectures
           build_abi "arm64-v8a" "aarch64" "armv8-a" "aarch64-linux-android"
           build_abi "armeabi-v7a" "arm" "armv7-a" "armv7a-linux-androideabi"
           build_abi "x86_64" "x86_64" "x86_64" "x86_64-linux-android"
@@ -109,16 +127,13 @@ jobs:
         with:
           name: ffmpeg-android-prebuilt
           path: output/
-          retention-days: 1
+          retention-days: 14
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # JOB 2: Build the Android APK
-  # ─────────────────────────────────────────────────────────────────────────────
   build-apk:
     needs: build-ffmpeg
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout App Source (Amkushu999/itsme2)
+      - name: Checkout App Source
         uses: actions/checkout@v4
         with:
           repository: Amkushu999/itsme2
