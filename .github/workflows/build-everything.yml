@@ -55,7 +55,7 @@ jobs:
             
             make distclean > /dev/null 2>&1 || true
             
-            # x86_64 needs special handling
+            # x86_64 requires --sysroot and --disable-asm
             if [ "$ARCH" = "x86_64" ]; then
               ./configure \
                 --target-os=android \
@@ -68,6 +68,7 @@ jobs:
                 --cxx=$CXX \
                 --ld=$LD \
                 --as=$AS \
+                --sysroot=$TOOLCHAIN/sysroot \
                 --enable-cross-compile \
                 --prefix=$GITHUB_WORKSPACE/output/$ABI \
                 --pkg-config=false \
@@ -91,9 +92,9 @@ jobs:
                 --enable-parser=h264,hevc,vp8,vp9,aac,mpegaudio,opus,mpeg4video,mpegvideo \
                 --enable-muxer=mp4,mov,matroska \
                 --extra-cflags="-O3 -fPIC" \
-                --extra-ldflags="-fPIC -L$TOOLCHAIN/sysroot/usr/lib/$TARGET/$API"
+                --extra-ldflags="-fPIC"
             else
-              # ARM targets - keep assembly enabled
+              # ARM targets - no --sysroot needed, keep assembly enabled
               ./configure \
                 --target-os=android \
                 --arch=$ARCH \
