@@ -6,9 +6,6 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
-  # ─────────────────────────────────────────────────────────────────────────────
-  # JOB 1: Build FFmpeg Native Libraries (ARM only)
-  # ─────────────────────────────────────────────────────────────────────────────
   build-ffmpeg:
     runs-on: ubuntu-22.04
     steps:
@@ -103,7 +100,6 @@ jobs:
             make install
           }
           
-          # Build ARM architectures only (x86_64 removed - only needed for emulators)
           build_abi "arm64-v8a" "aarch64" "armv8-a" "aarch64-linux-android"
           build_abi "armeabi-v7a" "arm" "armv7-a" "armv7a-linux-androideabi"
 
@@ -114,9 +110,6 @@ jobs:
           path: output/
           retention-days: 14
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # JOB 2: Build the Android APK
-  # ─────────────────────────────────────────────────────────────────────────────
   build-apk:
     needs: build-ffmpeg
     runs-on: ubuntu-latest
@@ -152,9 +145,20 @@ jobs:
           echo "sdk.dir=$ANDROID_SDK_ROOT" >> local.properties
           echo "ffmpeg.dir=$GITHUB_WORKSPACE/app-source/ffmpeg-android" >> local.properties
 
-      - name: Make Gradlew executable
+      - name: Generate gradlew if missing
         working-directory: app-source
-        run: chmod +x ./gradlew
+        run: |
+          if [ ! -f "./gradlew" ]; then
+            echo "gradlew not found, generating wrapper..."
+            gradle wrapper --gradle-version 8.0 || {
+              echo "Gradle not available, downloading wrapper manually..."
+              wget -q https://services.gradle.org/distributions/gradle-8.0-bin.zip
+              unzip -q gradle-8.0-bin.zip
+              ./gradle-8.0/bin/gradle wrapper
+              rm -rf gradle-8.0 gradle-8.0-bin.zip
+            }
+          fi
+          chmod +x ./gradlew
 
       - name: Build Debug APK
         working-directory: app-source
@@ -162,6 +166,8 @@ jobs:
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
+        with:
+          name: FaceGate-APK
         with:
           name: FaceGate-APK
           path: app-source/app/build/outputs/apk/debug/app-debug.apk
