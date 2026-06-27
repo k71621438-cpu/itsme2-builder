@@ -55,57 +55,79 @@ jobs:
             
             make distclean > /dev/null 2>&1 || true
             
-            # Base configure flags
-            CONFIGURE_FLAGS="
-              --target-os=android
-              --arch=$ARCH
-              --cpu=$CPU
-              --nm=$NM
-              --ar=$AR
-              --strip=$STRIP
-              --cc=$CC
-              --cxx=$CXX
-              --ld=$LD
-              --as=$AS
-              --enable-cross-compile
-              --prefix=$GITHUB_WORKSPACE/output/$ABI
-              --pkg-config=false
-              --enable-static
-              --disable-shared
-              --disable-programs
-              --disable-doc
-              --disable-iconv
-              --disable-avdevice
-              --disable-postproc
-              --disable-avfilter
-              --enable-pic
-              --enable-network
-              --enable-swresample
-              --enable-swscale
-              --enable-protocol=file,pipe,http,https,tcp,udp,rtp,rtsp,rtmps,rtmpt,rtmpte,hls,mms,mmsh,mmst,ftp,ftps
-              --enable-demuxer=rtsp,http,hls,rtmp,dash,mov,mp4,mkv,matroska,avi,flv,mpegts,mpegps,mjpeg,mpegvideo,wtv
-              --enable-decoder=h264,hevc,vp8,vp9,aac,mp3,opus,mpeg4,mpeg2video,mpeg1video,mjpeg,mjpegb,h263,h263p
-              --enable-parser=h264,hevc,vp8,vp9,aac,mpegaudio,opus,mpeg4video,mpegvideo
-              --enable-muxer=mp4,mov,matroska
-            "
-            
-            # x86_64-specific flags to fix linker issues
+            # x86_64 needs special handling
             if [ "$ARCH" = "x86_64" ]; then
-              CONFIGURE_FLAGS="$CONFIGURE_FLAGS
-                --disable-asm
-                --disable-x86asm
-                --extra-cflags=-O3 -fPIC
-                --extra-ldflags=-fPIC -L$TOOLCHAIN/sysroot/usr/lib/$TARGET/$API
-              "
+              ./configure \
+                --target-os=android \
+                --arch=$ARCH \
+                --cpu=$CPU \
+                --nm=$NM \
+                --ar=$AR \
+                --strip=$STRIP \
+                --cc=$CC \
+                --cxx=$CXX \
+                --ld=$LD \
+                --as=$AS \
+                --enable-cross-compile \
+                --prefix=$GITHUB_WORKSPACE/output/$ABI \
+                --pkg-config=false \
+                --enable-static \
+                --disable-shared \
+                --disable-programs \
+                --disable-doc \
+                --disable-iconv \
+                --disable-avdevice \
+                --disable-postproc \
+                --disable-avfilter \
+                --disable-asm \
+                --disable-x86asm \
+                --enable-pic \
+                --enable-network \
+                --enable-swresample \
+                --enable-swscale \
+                --enable-protocol=file,pipe,http,https,tcp,udp,rtp,rtsp,rtmps,rtmpt,rtmpte,hls,mms,mmsh,mmst,ftp,ftps \
+                --enable-demuxer=rtsp,http,hls,rtmp,dash,mov,mp4,mkv,matroska,avi,flv,mpegts,mpegps,mjpeg,mpegvideo,wtv \
+                --enable-decoder=h264,hevc,vp8,vp9,aac,mp3,opus,mpeg4,mpeg2video,mpeg1video,mjpeg,mjpegb,h263,h263p \
+                --enable-parser=h264,hevc,vp8,vp9,aac,mpegaudio,opus,mpeg4video,mpegvideo \
+                --enable-muxer=mp4,mov,matroska \
+                --extra-cflags="-O3 -fPIC" \
+                --extra-ldflags="-fPIC -L$TOOLCHAIN/sysroot/usr/lib/$TARGET/$API"
             else
-              # ARM targets - keep assembly enabled for performance
-              CONFIGURE_FLAGS="$CONFIGURE_FLAGS
-                --extra-cflags=-O3 -fPIC
-                --extra-ldflags=-fPIC
-              "
+              # ARM targets - keep assembly enabled
+              ./configure \
+                --target-os=android \
+                --arch=$ARCH \
+                --cpu=$CPU \
+                --nm=$NM \
+                --ar=$AR \
+                --strip=$STRIP \
+                --cc=$CC \
+                --cxx=$CXX \
+                --ld=$LD \
+                --as=$AS \
+                --enable-cross-compile \
+                --prefix=$GITHUB_WORKSPACE/output/$ABI \
+                --pkg-config=false \
+                --enable-static \
+                --disable-shared \
+                --disable-programs \
+                --disable-doc \
+                --disable-iconv \
+                --disable-avdevice \
+                --disable-postproc \
+                --disable-avfilter \
+                --enable-pic \
+                --enable-network \
+                --enable-swresample \
+                --enable-swscale \
+                --enable-protocol=file,pipe,http,https,tcp,udp,rtp,rtsp,rtmps,rtmpt,rtmpte,hls,mms,mmsh,mmst,ftp,ftps \
+                --enable-demuxer=rtsp,http,hls,rtmp,dash,mov,mp4,mkv,matroska,avi,flv,mpegts,mpegps,mjpeg,mpegvideo,wtv \
+                --enable-decoder=h264,hevc,vp8,vp9,aac,mp3,opus,mpeg4,mpeg2video,mpeg1video,mjpeg,mjpegb,h263,h263p \
+                --enable-parser=h264,hevc,vp8,vp9,aac,mpegaudio,opus,mpeg4video,mpegvideo \
+                --enable-muxer=mp4,mov,matroska \
+                --extra-cflags="-O3 -fPIC" \
+                --extra-ldflags="-fPIC"
             fi
-            
-            ./configure $CONFIGURE_FLAGS
             
             if [ $? -ne 0 ]; then
               echo "❌ Configure failed for $ABI"
