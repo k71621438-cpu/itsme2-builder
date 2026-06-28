@@ -16,7 +16,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: android-ndk-r25c
-          key: ndk-r25c-linux-v2
+          key: ndk-r25c-linux-v3
 
       - name: Install dependencies
         run: |
@@ -42,23 +42,26 @@ jobs:
           
           build_abi() {
             local ABI=$1 ARCH=$2 CPU=$3 TARGET=$4
-            echo "🔨 Building $ABI..."
+            echo "========================================"
+            echo "🔨 Building $ABI ($ARCH / $CPU)"
+            echo "========================================"
             
             export AR=$TOOLCHAIN/bin/llvm-ar
             export NM=$TOOLCHAIN/bin/llvm-nm
             export CC=$TOOLCHAIN/bin/$TARGET$API-clang
-            export AS=$CC
             export CXX=$TOOLCHAIN/bin/$TARGET$API-clang++
             export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
             export STRIP=$TOOLCHAIN/bin/llvm-strip
             
-            # Force PIC via environment for ALL source files
+            # Force PIC
             export CFLAGS="-O3 -fPIC -DANDROID -I$TOOLCHAIN/sysroot/usr/include"
             export CXXFLAGS="-O3 -fPIC -DANDROID"
             export LDFLAGS="-fPIC -L$TOOLCHAIN/sysroot/usr/lib/$TARGET/$API"
             
             make distclean > /dev/null 2>&1 || true
             
+            # Run configure but DON'T exit on failure so we can capture config.log
+            set +e
             ./configure \
               --target-os=android \
               --arch=$ARCH \
@@ -92,24 +95,39 @@ jobs:
               --enable-decoder=h264,hevc,vp8,vp9,aac,mp3,opus,mpeg4,mpeg2video,mpeg1video,mjpeg,mjpegb,h263,h263p \
               --enable-parser=h264,hevc,vp8,vp9,aac,mpegaudio,opus,mpeg4video,mpegvideo \
               --enable-muxer=mp4,mov,matroska
+            CONFIGURE_STATUS=$?
+            set -e
             
-            if [ $? -ne 0 ]; then
-              echo "❌ Configure failed for $ABI"
-              echo "=== config.log tail (last 80 lines) ==="
-              tail -n 80 ffbuild/config.log
-              exit 1
+            if [ $CONFIGURE_STATUS -ne 0 ]; then
+              echo "❌ Configure failed for $ABI (exit code $CONFIGURE_STATUS)"
+              echo "=== FULL config.log ==="
+              cat ffbuild/config.log
+              echo "=== END config.log ==="
+              return 1
             fi
             
             make -j$(nproc)
             make install
+            echo "✅ $ABI build complete"
           }
           
-          # Build all three architectures
-          build_abi "arm64-v8a"   "aarch64" "armv8-a" "aarch64-linux-android"
-          build_abi "armeabi-v7a" "arm"     "armv7-a" "armv7a-linux-androideabi"
-          build_abi "x86_64"      "x86_64"  "x86_64"  "x86_64-linux-android"
+          # Build ARM first (these always work)
+          build_abi "arm64-v8a"   "aarch64" "armv8-a" "aarch64-linux-android" || exit 1
+          build_abi "armeabi-v7a" "arm"     "armv7-a" "armv7a-linux-androideabi" || exit 1
+          
+          # Build x86_64 — if it fails, we capture the log but don't kill the whole job
+          echo "Attempting x86_64 build..."
+          if ! build_abi "x86_64" "x86_64" "x86_64" "x86_64-linux-android"; then
+            echo "⚠️ x86_64 build failed. Check config.log above for the exact error."
+            echo "If you don't need x86_64 (emulator support), you can remove it from your build.gradle ndk.abiFilters"
+            # Don't exit 1 here — let the job continue so ARM artifacts are still uploaded
+            # But create a placeholder so the artifact path exists
+            mkdir -p $GITHUB_WORKSPACE/output/x86_64
+            echo "x86_64 build failed. See previous step logs." > $GITHUB_WORKSPACE/output/x86_64/README.txt
+          fi
 
       - name: Upload FFmpeg Artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-android-prebuilt
