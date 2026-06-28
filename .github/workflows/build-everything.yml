@@ -16,7 +16,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: android-ndk-r25c
-          key: ndk-r25c-linux-v1
+          key: ndk-r25c-linux-v2   # BUMPED — forces fresh cache
 
       - name: Install dependencies
         run: |
@@ -34,7 +34,7 @@ jobs:
       - name: Clone FFmpeg
         run: git clone --depth 1 --branch n6.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg-src
 
-      - name: Build FFmpeg for Android (ARM only)
+      - name: Build FFmpeg for Android
         working-directory: ffmpeg-src
         run: |
           TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
@@ -51,32 +51,26 @@ jobs:
             export CXX=$TOOLCHAIN/bin/$TARGET$API-clang++
             export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
             export STRIP=$TOOLCHAIN/bin/llvm-strip
-            export LD=$CC
             
-            # CRITICAL FIX: Force -fPIC via environment variables
-            # This ensures ALL files (including data tables like ff_tx_tab_*) 
-            # are compiled as Position Independent Code
-            export CFLAGS="-O3 -fPIC"
-            export CXXFLAGS="-O3 -fPIC"
-            export ASFLAGS="-fPIC"
-            export LDFLAGS="-fPIC"
+            # Force PIC at the environment level so EVERY file gets it
+            export CFLAGS="-O3 -fPIC -DANDROID -I$TOOLCHAIN/sysroot/usr/include"
+            export CXXFLAGS="-O3 -fPIC -DANDROID"
+            export LDFLAGS="-fPIC -L$TOOLCHAIN/sysroot/usr/lib/$TARGET/$API"
             
             make distclean > /dev/null 2>&1 || true
             
-            # If you still get PIC errors after this, add --disable-asm
             ./configure \
               --target-os=android \
               --arch=$ARCH \
               --cpu=$CPU \
-              --nm=$NM \
-              --ar=$AR \
-              --strip=$STRIP \
+              --enable-cross-compile \
+              --sysroot=$TOOLCHAIN/sysroot \
               --cc=$CC \
               --cxx=$CXX \
-              --ld=$LD \
-              --as=$AS \
-              --enable-cross-compile \
-              --enable-pic \
+              --ar=$AR \
+              --nm=$NM \
+              --ranlib=$RANLIB \
+              --strip=$STRIP \
               --prefix=$GITHUB_WORKSPACE/output/$ABI \
               --pkg-config=false \
               --enable-static \
@@ -87,6 +81,9 @@ jobs:
               --disable-avdevice \
               --disable-postproc \
               --disable-avfilter \
+              --disable-asm \
+              --disable-x86asm \
+              --enable-pic \
               --enable-network \
               --enable-swresample \
               --enable-swscale \
@@ -94,23 +91,16 @@ jobs:
               --enable-demuxer=rtsp,http,hls,rtmp,dash,mov,mp4,mkv,matroska,avi,flv,mpegts,mpegps,mjpeg,mpegvideo,wtv \
               --enable-decoder=h264,hevc,vp8,vp9,aac,mp3,opus,mpeg4,mpeg2video,mpeg1video,mjpeg,mjpegb,h263,h263p \
               --enable-parser=h264,hevc,vp8,vp9,aac,mpegaudio,opus,mpeg4video,mpegvideo \
-              --enable-muxer=mp4,mov,matroska \
-              --extra-cflags="-O3 -fPIC" \
-              --extra-ldflags="-fPIC"
-            
-            if [ $? -ne 0 ]; then
-              echo "❌ Configure failed for $ABI"
-              echo "=== Last 100 lines of config.log ==="
-              tail -n 100 ffbuild/config.log
-              exit 1
-            fi
+              --enable-muxer=mp4,mov,matroska
             
             make -j$(nproc)
             make install
           }
           
-          build_abi "arm64-v8a" "aarch64" "armv8-a" "aarch64-linux-android"
-          build_abi "armeabi-v7a" "arm" "armv7-a" "armv7a-linux-androideabi"
+          # Build all three ABIs (add x86_64 back)
+          build_abi "arm64-v8a"   "aarch64" "armv8-a" "aarch64-linux-android"
+          build_abi "armeabi-v7a" "arm"     "armv7-a" "armv7a-linux-androideabi"
+          build_abi "x86_64"      "x86_64"  "x86_64"  "x86_64-linux-android"
 
       - name: Upload FFmpeg Artifacts
         uses: actions/upload-artifact@v4
@@ -123,7 +113,7 @@ jobs:
     needs: build-ffmpeg
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout App Source (Amkushu999/itsme3)
+      - name: Checkout App Source
         uses: actions/checkout@v4
         with:
           repository: Amkushu999/itsme3
@@ -156,18 +146,7 @@ jobs:
 
       - name: Make Gradlew executable
         working-directory: app-source
-        run: |
-          if [ ! -f "./gradlew" ]; then
-            echo "gradlew not found, generating wrapper..."
-            gradle wrapper --gradle-version 8.9 || {
-              echo "Gradle not available, downloading wrapper manually..."
-              wget -q https://services.gradle.org/distributions/gradle-8.9-bin.zip
-              unzip -q gradle-8.9-bin.zip
-              ./gradle-8.9/bin/gradle wrapper
-              rm -rf gradle-8.9 gradle-8.9-bin.zip
-            }
-          fi
-          chmod +x ./gradlew
+        run: chmod +x ./gradlew
 
       - name: Build Debug APK
         working-directory: app-source
