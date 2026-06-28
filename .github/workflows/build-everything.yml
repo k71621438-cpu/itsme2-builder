@@ -60,7 +60,6 @@ jobs:
             
             make distclean > /dev/null 2>&1 || true
             
-            # Run configure but DON'T exit on failure so we can capture config.log
             set +e
             ./configure \
               --target-os=android \
@@ -99,11 +98,10 @@ jobs:
             set -e
             
             if [ $CONFIGURE_STATUS -ne 0 ]; then
-              echo "❌ Configure failed for $ABI (exit code $CONFIGURE_STATUS)"
-              echo "=== FULL config.log ==="
-              cat ffbuild/config.log
-              echo "=== END config.log ==="
-              return 1
+              echo "❌ Configure failed for $ABI"
+              echo "=== config.log tail (last 100 lines) ==="
+              tail -n 100 ffbuild/config.log
+              exit 1
             fi
             
             make -j$(nproc)
@@ -111,23 +109,13 @@ jobs:
             echo "✅ $ABI build complete"
           }
           
-          # Build ARM first (these always work)
-          build_abi "arm64-v8a"   "aarch64" "armv8-a" "aarch64-linux-android" || exit 1
-          build_abi "armeabi-v7a" "arm"     "armv7-a" "armv7a-linux-androideabi" || exit 1
-          
-          # Build x86_64 — if it fails, we capture the log but don't kill the whole job
-          echo "Attempting x86_64 build..."
-          if ! build_abi "x86_64" "x86_64" "x86_64" "x86_64-linux-android"; then
-            echo "⚠️ x86_64 build failed. Check config.log above for the exact error."
-            echo "If you don't need x86_64 (emulator support), you can remove it from your build.gradle ndk.abiFilters"
-            # Don't exit 1 here — let the job continue so ARM artifacts are still uploaded
-            # But create a placeholder so the artifact path exists
-            mkdir -p $GITHUB_WORKSPACE/output/x86_64
-            echo "x86_64 build failed. See previous step logs." > $GITHUB_WORKSPACE/output/x86_64/README.txt
-          fi
+          # Build all three architectures
+          # NOTE: x86_64 CPU is "x86-64" (hyphen) for Clang, not "x86_64" (underscore)
+          build_abi "arm64-v8a"   "aarch64" "armv8-a" "aarch64-linux-android"
+          build_abi "armeabi-v7a" "arm"     "armv7-a" "armv7a-linux-androideabi"
+          build_abi "x86_64"      "x86_64"  "x86-64"  "x86_64-linux-android"
 
       - name: Upload FFmpeg Artifacts
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-android-prebuilt
