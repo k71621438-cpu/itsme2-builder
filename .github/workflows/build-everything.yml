@@ -53,8 +53,17 @@ jobs:
             export STRIP=$TOOLCHAIN/bin/llvm-strip
             export LD=$CC
             
+            # CRITICAL FIX: Force -fPIC via environment variables
+            # This ensures ALL files (including data tables like ff_tx_tab_*) 
+            # are compiled as Position Independent Code
+            export CFLAGS="-O3 -fPIC"
+            export CXXFLAGS="-O3 -fPIC"
+            export ASFLAGS="-fPIC"
+            export LDFLAGS="-fPIC"
+            
             make distclean > /dev/null 2>&1 || true
             
+            # If you still get PIC errors after this, add --disable-asm
             ./configure \
               --target-os=android \
               --arch=$ARCH \
@@ -67,6 +76,7 @@ jobs:
               --ld=$LD \
               --as=$AS \
               --enable-cross-compile \
+              --enable-pic \
               --prefix=$GITHUB_WORKSPACE/output/$ABI \
               --pkg-config=false \
               --enable-static \
@@ -77,7 +87,6 @@ jobs:
               --disable-avdevice \
               --disable-postproc \
               --disable-avfilter \
-              --enable-pic \
               --enable-network \
               --enable-swresample \
               --enable-swscale \
@@ -114,10 +123,10 @@ jobs:
     needs: build-ffmpeg
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout App Source (Amkushu999/itsme2)
+      - name: Checkout App Source (Amkushu999/itsme3)
         uses: actions/checkout@v4
         with:
-          repository: Amkushu999/itsme2
+          repository: Amkushu999/itsme3
           token: ${{ secrets.APP_REPO_PAT }}
           path: app-source
 
@@ -145,17 +154,17 @@ jobs:
           echo "sdk.dir=$ANDROID_SDK_ROOT" >> local.properties
           echo "ffmpeg.dir=$GITHUB_WORKSPACE/app-source/ffmpeg-android" >> local.properties
 
-      - name: Generate gradlew if missing
+      - name: Make Gradlew executable
         working-directory: app-source
         run: |
           if [ ! -f "./gradlew" ]; then
             echo "gradlew not found, generating wrapper..."
-            gradle wrapper --gradle-version 8.0 || {
+            gradle wrapper --gradle-version 8.9 || {
               echo "Gradle not available, downloading wrapper manually..."
-              wget -q https://services.gradle.org/distributions/gradle-8.0-bin.zip
-              unzip -q gradle-8.0-bin.zip
-              ./gradle-8.0/bin/gradle wrapper
-              rm -rf gradle-8.0 gradle-8.0-bin.zip
+              wget -q https://services.gradle.org/distributions/gradle-8.9-bin.zip
+              unzip -q gradle-8.9-bin.zip
+              ./gradle-8.9/bin/gradle wrapper
+              rm -rf gradle-8.9 gradle-8.9-bin.zip
             }
           fi
           chmod +x ./gradlew
