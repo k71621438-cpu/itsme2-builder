@@ -16,7 +16,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: android-ndk-r25c
-          key: ndk-r25c-linux-v3
+          key: ndk-r25c-linux-v5
 
       - name: Install dependencies
         run: |
@@ -43,7 +43,7 @@ jobs:
           build_abi() {
             local ABI=$1 ARCH=$2 CPU=$3 TARGET=$4
             echo "========================================"
-            echo "🔨 Building $ABI ($ARCH / $CPU)"
+            echo "🔨 Building FFmpeg $ABI ($ARCH / $CPU)"
             echo "========================================"
             
             export AR=$TOOLCHAIN/bin/llvm-ar
@@ -53,12 +53,14 @@ jobs:
             export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
             export STRIP=$TOOLCHAIN/bin/llvm-strip
             
-            # Force PIC
+            # Force PIC for ALL source files
             export CFLAGS="-O3 -fPIC -DANDROID -I$TOOLCHAIN/sysroot/usr/include"
             export CXXFLAGS="-O3 -fPIC -DANDROID"
             export LDFLAGS="-fPIC -L$TOOLCHAIN/sysroot/usr/lib/$TARGET/$API"
             
+            # Nuclear clean
             make distclean > /dev/null 2>&1 || true
+            rm -f config.h config.mak .config ffbuild/config.mak
             
             set +e
             ./configure \
@@ -89,7 +91,7 @@ jobs:
               --enable-network \
               --enable-swresample \
               --enable-swscale \
-              --enable-protocol=file,pipe,http,https,tcp,udp,rtp,rtsp,rtmps,rtmpt,rtmpte,hls,mms,mmsh,mmst,ftp,ftps \
+              --enable-protocol=file,pipe,http,https,tcp,udp,rtp,rtsp,rtmps,rtmpt,rtmpte,rtmp,hls,mms,mmsh,mmst,ftp,ftps \
               --enable-demuxer=rtsp,http,hls,rtmp,dash,mov,mp4,mkv,matroska,avi,flv,mpegts,mpegps,mjpeg,mpegvideo,wtv \
               --enable-decoder=h264,hevc,vp8,vp9,aac,mp3,opus,mpeg4,mpeg2video,mpeg1video,mjpeg,mjpegb,h263,h263p \
               --enable-parser=h264,hevc,vp8,vp9,aac,mpegaudio,opus,mpeg4video,mpegvideo \
@@ -106,11 +108,15 @@ jobs:
             
             make -j$(nproc)
             make install
+            
+            # Verify protocols
+            echo "=== Verifying protocols for $ABI ==="
+            strings $GITHUB_WORKSPACE/output/$ABI/lib/libavformat.a | grep -E "^(file|pipe|http|tcp|udp|rtp|rtsp|rtmp|hls|mms|ftp)" | sort -u || true
+            
             echo "✅ $ABI build complete"
           }
           
           # Build all three architectures
-          # NOTE: x86_64 CPU is "x86-64" (hyphen) for Clang, not "x86_64" (underscore)
           build_abi "arm64-v8a"   "aarch64" "armv8-a" "aarch64-linux-android"
           build_abi "armeabi-v7a" "arm"     "armv7-a" "armv7a-linux-androideabi"
           build_abi "x86_64"      "x86_64"  "x86-64"  "x86_64-linux-android"
