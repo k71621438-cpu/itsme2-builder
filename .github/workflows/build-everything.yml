@@ -16,7 +16,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: android-ndk-r25c
-          key: ndk-r25c-linux-v7
+          key: ndk-r25c-linux-v8
 
       - name: Install dependencies
         run: |
@@ -46,26 +46,24 @@ jobs:
             local ABI=$1 ARCH=$2
             echo "🔨 Building OpenSSL for $ABI..."
             
-            # OpenSSL Android cross-compile environment
             export ANDROID_NDK_ROOT=$NDK
             export PATH=$TOOLCHAIN/bin:$PATH
             
             mkdir -p openssl-src/build-$ABI
             cd openssl-src/build-$ABI
             
-            # Configure OpenSSL for Android
-            # Note: no-doc (singular) is correct for OpenSSL 3.x, NOT no-docs
+            # OpenSSL 3.x: NO doc flags needed - just use no-shared, no-tests, no-ui-console
+            # make install_sw automatically skips docs
             ../Configure android-$ARCH \
               -D__ANDROID_API__=$API \
               --prefix=$GITHUB_WORKSPACE/openssl/$ABI \
               --openssldir=$GITHUB_WORKSPACE/openssl/$ABI \
               no-shared \
               no-tests \
-              no-doc \
               no-ui-console
             
             make -j$(nproc)
-            make install_sw  # install_sw skips docs/manpages automatically
+            make install_sw
             
             cd ../..
             echo "✅ OpenSSL $ABI complete"
