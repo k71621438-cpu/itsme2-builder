@@ -16,12 +16,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: android-ndk-r25c
-          key: ndk-r25c-linux-v5
+          key: ndk-r25c-linux-v6
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential nasm yasm wget unzip
+          sudo apt-get install -y build-essential nasm yasm wget unzip cmake perl
 
       - name: Download Android NDK
         run: |
@@ -33,6 +33,38 @@ jobs:
 
       - name: Clone FFmpeg
         run: git clone --depth 1 --branch n6.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg-src
+
+      - name: Build OpenSSL for Android
+        run: |
+          TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
+          API=29
+          
+          git clone --depth 1 --branch openssl-3.1.4 https://github.com/openssl/openssl.git openssl-src
+          
+          build_openssl_abi() {
+            local ABI=$1 ARCH=$2 TARGET=$3
+            echo "🔨 Building OpenSSL for $ABI..."
+            
+            mkdir -p openssl-src/build-$ABI
+            cd openssl-src/build-$ABI
+            
+            ../Configure android-$ARCH \
+              -D__ANDROID_API__=$API \
+              --prefix=$GITHUB_WORKSPACE/openssl/$ABI \
+              --openssldir=$GITHUB_WORKSPACE/openssl/$ABI \
+              no-shared \
+              no-tests \
+              no-docs
+            
+            make -j$(nproc)
+            make install_sw
+            
+            cd ../..
+          }
+          
+          build_openssl_abi "arm64-v8a"   "arm64" "aarch64-linux-android"
+          build_openssl_abi "armeabi-v7a" "arm"   "armv7a-linux-androideabi"
+          build_openssl_abi "x86_64"      "x86_64" "x86_64-linux-android"
 
       - name: Build FFmpeg for Android
         working-directory: ffmpeg-src
@@ -53,12 +85,12 @@ jobs:
             export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
             export STRIP=$TOOLCHAIN/bin/llvm-strip
             
-            # Force PIC for ALL source files
-            export CFLAGS="-O3 -fPIC -DANDROID -I$TOOLCHAIN/sysroot/usr/include"
-            export CXXFLAGS="-O3 -fPIC -DANDROID"
-            export LDFLAGS="-fPIC -L$TOOLCHAIN/sysroot/usr/lib/$TARGET/$API"
+            OPENSSL_PREFIX=$GITHUB_WORKSPACE/openssl/$ABI
             
-            # Nuclear clean
+            export CFLAGS="-O3 -fPIC -DANDROID -I$TOOLCHAIN/sysroot/usr/include -I$OPENSSL_PREFIX/include"
+            export CXXFLAGS="-O3 -fPIC -DANDROID -I$OPENSSL_PREFIX/include"
+            export LDFLAGS="-fPIC -L$TOOLCHAIN/sysroot/usr/lib/$TARGET/$API -L$OPENSSL_PREFIX/lib"
+            
             make distclean > /dev/null 2>&1 || true
             rm -f config.h config.mak .config ffbuild/config.mak
             
@@ -88,12 +120,17 @@ jobs:
               --disable-asm \
               --disable-x86asm \
               --enable-pic \
+              --enable-jni \
+              --enable-mediacodec \
               --enable-network \
               --enable-swresample \
               --enable-swscale \
+              --enable-openssl \
+              --extra-cflags="-I$OPENSSL_PREFIX/include" \
+              --extra-ldflags="-L$OPENSSL_PREFIX/lib" \
               --enable-protocol=file,pipe,http,https,tcp,udp,rtp,rtsp,rtmps,rtmpt,rtmpte,rtmp,hls,mms,mmsh,mmst,ftp,ftps \
               --enable-demuxer=rtsp,http,hls,rtmp,dash,mov,mp4,mkv,matroska,avi,flv,mpegts,mpegps,mjpeg,mpegvideo,wtv \
-              --enable-decoder=h264,hevc,vp8,vp9,aac,mp3,opus,mpeg4,mpeg2video,mpeg1video,mjpeg,mjpegb,h263,h263p \
+              --enable-decoder=h264,h264_mediacodec,hevc,hevc_mediacodec,vp8,vp8_mediacodec,vp9,vp9_mediacodec,aac,mp3,opus,mpeg4,mpeg2video,mpeg1video,mjpeg,mjpegb,h263,h263p \
               --enable-parser=h264,hevc,vp8,vp9,aac,mpegaudio,opus,mpeg4video,mpegvideo \
               --enable-muxer=mp4,mov,matroska
             CONFIGURE_STATUS=$?
@@ -101,7 +138,6 @@ jobs:
             
             if [ $CONFIGURE_STATUS -ne 0 ]; then
               echo "❌ Configure failed for $ABI"
-              echo "=== config.log tail (last 100 lines) ==="
               tail -n 100 ffbuild/config.log
               exit 1
             fi
@@ -109,14 +145,9 @@ jobs:
             make -j$(nproc)
             make install
             
-            # Verify protocols
-            echo "=== Verifying protocols for $ABI ==="
-            strings $GITHUB_WORKSPACE/output/$ABI/lib/libavformat.a | grep -E "^(file|pipe|http|tcp|udp|rtp|rtsp|rtmp|hls|mms|ftp)" | sort -u || true
-            
             echo "✅ $ABI build complete"
           }
           
-          # Build all three architectures
           build_abi "arm64-v8a"   "aarch64" "armv8-a" "aarch64-linux-android"
           build_abi "armeabi-v7a" "arm"     "armv7-a" "armv7a-linux-androideabi"
           build_abi "x86_64"      "x86_64"  "x86-64"  "x86_64-linux-android"
@@ -126,6 +157,13 @@ jobs:
         with:
           name: ffmpeg-android-prebuilt
           path: output/
+          retention-days: 14
+
+      - name: Upload OpenSSL Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openssl-android-prebuilt
+          path: openssl/
           retention-days: 14
 
   build-apk:
@@ -145,6 +183,12 @@ jobs:
           name: ffmpeg-android-prebuilt
           path: app-source/ffmpeg-android/
 
+      - name: Download OpenSSL Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: openssl-android-prebuilt
+          path: app-source/openssl-android/
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -162,6 +206,7 @@ jobs:
         run: |
           echo "sdk.dir=$ANDROID_SDK_ROOT" >> local.properties
           echo "ffmpeg.dir=$GITHUB_WORKSPACE/app-source/ffmpeg-android" >> local.properties
+          echo "openssl.dir=$GITHUB_WORKSPACE/app-source/openssl-android" >> local.properties
 
       - name: Make Gradlew executable
         working-directory: app-source
