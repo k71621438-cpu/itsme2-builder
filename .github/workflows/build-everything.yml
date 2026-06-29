@@ -16,7 +16,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: android-ndk-r25c
-          key: ndk-r25c-linux-v8
+          key: ndk-r25c-linux-v9
 
       - name: Install dependencies
         run: |
@@ -43,7 +43,7 @@ jobs:
           API=29
           
           build_openssl_abi() {
-            local ABI=$1 ARCH=$2
+            local ABI=$1 ARCH=$2 EXTRA_OPTS=$3
             echo "🔨 Building OpenSSL for $ABI..."
             
             export ANDROID_NDK_ROOT=$NDK
@@ -52,15 +52,14 @@ jobs:
             mkdir -p openssl-src/build-$ABI
             cd openssl-src/build-$ABI
             
-            # OpenSSL 3.x: NO doc flags needed - just use no-shared, no-tests, no-ui-console
-            # make install_sw automatically skips docs
             ../Configure android-$ARCH \
               -D__ANDROID_API__=$API \
               --prefix=$GITHUB_WORKSPACE/openssl/$ABI \
               --openssldir=$GITHUB_WORKSPACE/openssl/$ABI \
               no-shared \
               no-tests \
-              no-ui-console
+              no-ui-console \
+              $EXTRA_OPTS
             
             make -j$(nproc)
             make install_sw
@@ -69,9 +68,14 @@ jobs:
             echo "✅ OpenSSL $ABI complete"
           }
           
-          build_openssl_abi "arm64-v8a"   "arm64"
-          build_openssl_abi "armeabi-v7a" "arm"
-          build_openssl_abi "x86_64"      "x86_64"
+          # arm64-v8a: use assembly (PIC-compatible)
+          build_openssl_abi "arm64-v8a" "arm64" ""
+          
+          # armeabi-v7a: disable assembly to avoid PIC issues
+          build_openssl_abi "armeabi-v7a" "arm" "no-asm"
+          
+          # x86_64: use assembly (PIC-compatible)
+          build_openssl_abi "x86_64" "x86_64" ""
 
       - name: Build FFmpeg for Android
         working-directory: ffmpeg-src
