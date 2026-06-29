@@ -16,7 +16,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: android-ndk-r25c
-          key: ndk-r25c-linux-v6
+          key: ndk-r25c-linux-v7
 
       - name: Install dependencies
         run: |
@@ -30,41 +30,50 @@ jobs:
             unzip -q android-ndk-r25c-linux.zip
           fi
           echo "NDK=$PWD/android-ndk-r25c" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$PWD/android-ndk-r25c" >> $GITHUB_ENV
 
       - name: Clone FFmpeg
         run: git clone --depth 1 --branch n6.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg-src
 
       - name: Build OpenSSL for Android
         run: |
+          git clone --depth 1 --branch openssl-3.1.4 https://github.com/openssl/openssl.git openssl-src
+          
           TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
           API=29
           
-          git clone --depth 1 --branch openssl-3.1.4 https://github.com/openssl/openssl.git openssl-src
-          
           build_openssl_abi() {
-            local ABI=$1 ARCH=$2 TARGET=$3
+            local ABI=$1 ARCH=$2
             echo "🔨 Building OpenSSL for $ABI..."
+            
+            # OpenSSL Android cross-compile environment
+            export ANDROID_NDK_ROOT=$NDK
+            export PATH=$TOOLCHAIN/bin:$PATH
             
             mkdir -p openssl-src/build-$ABI
             cd openssl-src/build-$ABI
             
+            # Configure OpenSSL for Android
+            # Note: no-doc (singular) is correct for OpenSSL 3.x, NOT no-docs
             ../Configure android-$ARCH \
               -D__ANDROID_API__=$API \
               --prefix=$GITHUB_WORKSPACE/openssl/$ABI \
               --openssldir=$GITHUB_WORKSPACE/openssl/$ABI \
               no-shared \
               no-tests \
-              no-docs
+              no-doc \
+              no-ui-console
             
             make -j$(nproc)
-            make install_sw
+            make install_sw  # install_sw skips docs/manpages automatically
             
             cd ../..
+            echo "✅ OpenSSL $ABI complete"
           }
           
-          build_openssl_abi "arm64-v8a"   "arm64" "aarch64-linux-android"
-          build_openssl_abi "armeabi-v7a" "arm"   "armv7a-linux-androideabi"
-          build_openssl_abi "x86_64"      "x86_64" "x86_64-linux-android"
+          build_openssl_abi "arm64-v8a"   "arm64"
+          build_openssl_abi "armeabi-v7a" "arm"
+          build_openssl_abi "x86_64"      "x86_64"
 
       - name: Build FFmpeg for Android
         working-directory: ffmpeg-src
@@ -87,9 +96,9 @@ jobs:
             
             OPENSSL_PREFIX=$GITHUB_WORKSPACE/openssl/$ABI
             
-            export CFLAGS="-O3 -fPIC -DANDROID -I$TOOLCHAIN/sysroot/usr/include -I$OPENSSL_PREFIX/include"
+            export CFLAGS="-O3 -fPIC -DANDROID -I$OPENSSL_PREFIX/include"
             export CXXFLAGS="-O3 -fPIC -DANDROID -I$OPENSSL_PREFIX/include"
-            export LDFLAGS="-fPIC -L$TOOLCHAIN/sysroot/usr/lib/$TARGET/$API -L$OPENSSL_PREFIX/lib"
+            export LDFLAGS="-fPIC -L$OPENSSL_PREFIX/lib"
             
             make distclean > /dev/null 2>&1 || true
             rm -f config.h config.mak .config ffbuild/config.mak
@@ -128,11 +137,18 @@ jobs:
               --enable-openssl \
               --extra-cflags="-I$OPENSSL_PREFIX/include" \
               --extra-ldflags="-L$OPENSSL_PREFIX/lib" \
-              --enable-protocol=file,pipe,http,https,tcp,udp,rtp,rtsp,rtmps,rtmpt,rtmpte,rtmp,hls,mms,mmsh,mmst,ftp,ftps \
-              --enable-demuxer=rtsp,http,hls,rtmp,dash,mov,mp4,mkv,matroska,avi,flv,mpegts,mpegps,mjpeg,mpegvideo,wtv \
-              --enable-decoder=h264,h264_mediacodec,hevc,hevc_mediacodec,vp8,vp8_mediacodec,vp9,vp9_mediacodec,aac,mp3,opus,mpeg4,mpeg2video,mpeg1video,mjpeg,mjpegb,h263,h263p \
-              --enable-parser=h264,hevc,vp8,vp9,aac,mpegaudio,opus,mpeg4video,mpegvideo \
-              --enable-muxer=mp4,mov,matroska
+              \
+              --enable-protocol=file,pipe,http,https,tcp,udp,rtp,rtsp,rtmps,rtmpt,rtmpte,rtmp,hls,mms,mmsh,mmst,ftp,ftps,concat,crypto,data \
+              \
+              --enable-demuxer=rtsp,http,hls,rtmp,dash,mov,mp4,mkv,matroska,avi,flv,mpegts,mpegps,mjpeg,mpegvideo,wtv,webm,ogg,wav,aac,mp3,flac,rawvideo,concat \
+              \
+              --enable-decoder=h264,h264_mediacodec,hevc,hevc_mediacodec,vp8,vp8_mediacodec,vp9,vp9_mediacodec,av1,aac,mp3,opus,mpeg4,mpeg2video,mpeg1video,mjpeg,mjpegb,h263,h263p,flac,vorbis,ac3,eac3,rawvideo,pcm_s16le,pcm_s24le,pcm_f32le \
+              \
+              --enable-parser=h264,hevc,vp8,vp9,av1,aac,mpegaudio,opus,mpeg4video,mpegvideo,flac,ac3,mjpeg \
+              \
+              --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb,aac_adtstoasc,extract_extradata,vp9_superframe \
+              \
+              --enable-muxer=mp4,mov,matroska,mpegts,null
             CONFIGURE_STATUS=$?
             set -e
             
@@ -145,7 +161,7 @@ jobs:
             make -j$(nproc)
             make install
             
-            echo "✅ $ABI build complete"
+            echo "✅ FFmpeg $ABI complete"
           }
           
           build_abi "arm64-v8a"   "aarch64" "armv8-a" "aarch64-linux-android"
